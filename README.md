@@ -5,4 +5,4 @@ This is made using the reboot syscall.
 Examples:
 cbot shutdown
 cbot reboot
-cbot suspen
+cbot suspend
