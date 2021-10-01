@@ -132,7 +132,7 @@ _start:
 
 ; Count length of rdi
 .strlen:
-	xor rax, rax				; Init counter
+	xor rax, rax			; Init counter
 .strloop:
 	inc rdi					; Incr char pointer to next char
 	add rax, 1				; Incr counter
