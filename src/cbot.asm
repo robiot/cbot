@@ -1,7 +1,7 @@
-; Reboots your linux system
-; /usr/include/linux/reboot.h
+; Reboot or shutdown your system
 ; https://chromium.googlesource.com/chromiumos/docs/+/HEAD/constants/syscalls.md
 
+; /usr/include/linux/reboot.h
 ; #define	LINUX_REBOOT_CMD_RESTART	0x01234567
 ; #define	LINUX_REBOOT_CMD_HALT		0xCDEF0123
 ; #define	LINUX_REBOOT_CMD_CAD_ON		0x89ABCDEF
@@ -11,16 +11,14 @@
 ; #define	LINUX_REBOOT_CMD_KEXEC		0x45584543
 ; #define	LINUX_REBOOT_CMD_SW_SUSPEND	0xD000FCE2
 
-; Stack:
-; argc
-; arg[n]
-
 section .data
+	newline db 10
+	; Args
 	shutdown_text db "shutdown", 0
 	reboot_text db "reboot", 0
-	suspend_text db "suspend", 0
-
-	not_enough_args_text db "1 argument required: shutdown, reboot, suspend", 10
+	; Help messages
+	not_enough_args_text db "1 argument required: shutdown, reboot", 0
+	root_required_text db "You cannot perform this operation unless you are root", 0
 
 section .text
 	global _start
@@ -30,27 +28,18 @@ _start:
 	call .get_argcount
 	cmp rax, 1
 	je .not_enough_args
+	
+	; Check if ran as root
+	call .get_uid
+	cmp rax, 0
+	jg .not_root
 
 	call .arghandler
 	call .exit
 
-; Count lenght of rdi
-.strlen:
-	mov rax, 1				; Init counter
-.loop:
-	add rdi, 1				; Incr char pointer to next char
-	add rax, 1				; Incr counter
-	cmp byte [rdi], 0x00
-	jne .loop
-	ret
-
 .not_enough_args:
 	mov rsi, not_enough_args_text	; Text for print
-	mov rdi, not_enough_args_text	; Copy text to rdi, for strlen
-	call .strlen
-	mov rdx, rax					; Ouput value of strlen in rax
-	call .print
-	call .exit
+	call .printf
 	ret
 
 .get_argcount:
@@ -59,53 +48,68 @@ _start:
 	push r10
 	ret
 
+.not_root:
+	mov rsi, root_required_text
+	call .printf
+	ret
+
+; Return in rax
+; https://man7.org/linux/man-pages/man2/geteuid.2.html
+.get_uid:
+	mov rax, 107
+	syscall
+	ret
+
+; Success & fail for argchecker
+.success:
+	mov rax, 1
+	ret
+.fail:
+	ret
+
+; Takes rdi(text)
+.argchecker:
+	; Why is there so much in stack? 8-> 16-> 24->
+	mov rsi, [rsp + 24]	; Stack pointer mem addr (rsp: Register Stack Pointer), arg[1]
+	xor rax, rax		; Rax = 0
+	xor rdx, rdx		; Rdx = 0
+.argloop:
+	; Loop trough characters and compare
+	mov al, [rsi + rdx]
+	mov bl, [rdi + rdx]
+	inc rdx
+	cmp al, bl
+	jne .fail
+	; jne .printf
+	cmp al, 0
+	je .success
+	jmp .argloop
+	ret
+
 .arghandler:
-	; pop r11				; Temorary Remove
-	;mov rsi, [rsp + 8]	; Stack pointer mem addr
-
 	; Shutdown
-	;cmp rsi, shutdown_text
-	;je .arg_given
-	; Reboot
-	; cmp rsi, reboot_text
-	; je .arg_given
+	mov rdi, shutdown_text
+	call .argchecker
+	cmp rax, 1
+	je .do_shutdown
 	; Suspend
-	; cmp rsi, suspend_text
-	; je .arg_given
+	mov rdi, reboot_text
+	call .argchecker
+	cmp rax, 1
+	je .do_reboot
 
-	;mov rdi, rsi	; Put arg in rdi 
-	;call .strlen	; Return in rax
-	;mov rdx, rax
-	;push r11
-	;call .print
-	;mov rdx, 0x01234567
-	; mov rdx, 0x01234567
-	call .reboot
+	call .not_enough_args
 	call .exit
 	ret
 
-; .print_argcount:
-; 	add rdi, 48
-; 	push rdi
-; 	mov rsi, rsp
-; 	mov rdx, 8
-; 	call .print
-; 	pop rdi
-; 	ret
-
-; .arg_given:
-; 	call .not_enough_args
-; 	call .exit
-
-; .set_shutdown:
-; 	mov rdx, 0x4321FEDC
-; 	ret
-; .set_reboot:
-; 	mov rdx, 0x01234567
-; 	ret
-; .set_suspend:
-; 	mov rdx, 0xD000FCE2
-; 	ret
+.do_shutdown:
+	mov rdx, 0x4321FEDC
+	call .reboot;
+	ret
+.do_reboot:
+	mov rdx, 0x01234567
+	call .reboot;
+	ret
 
 ; Takes rdx value
 ; https://man7.org/linux/man-pages/man2/reboot.2.html
@@ -113,10 +117,10 @@ _start:
 	mov rax, 169
 	mov rdi, 0xfee1dead
 	mov rsi, 672274793
-	mov rdx, 0x01234567
 	syscall
 
 	call .sync
+	call .exit
 	ret
 
 ; Needed, else data will be lost
@@ -126,14 +130,45 @@ _start:
 	syscall
 	ret
 
-; Takes: rsi(text), rdx(lenght)
+; Count length of rdi
+.strlen:
+	xor rax, rax				; Init counter
+.strloop:
+	inc rdi					; Incr char pointer to next char
+	add rax, 1				; Incr counter
+	cmp byte [rdi], 0x00
+	jne .strloop
+	ret
+	
+; Takes rsi(text)
+.printf:
+	; mov rsi, root_required_text
+	mov rdi, rsi
+	call .strlen
+	mov rdx, rax
+	call .print
+	call .exit
+	ret
+
+; Print new line
+.printnln:
+	mov rax, 1
+	mov rdi, 1
+	mov rsi, newline
+	mov rdx, 1
+	syscall
+	ret
+
+; Takes: rsi(text), rdx(length)
 .print:
 	mov rax, 1
 	mov rdi, 1
 	syscall
+
+	call .printnln
 	ret
 
 .exit:
 	mov rax, 60		; Exit syscall
-	mov rdi, 0
+	xor rdi, rdi	; Set to 0
 	syscall
