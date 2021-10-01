@@ -7,3 +7,12 @@ Examples:
 sudo cbot shutdown
 sudo cbot reboot
 ```
+
+
+How to build:
+```
+git clone https://github.com/robiot/cbot.git
+cd cbot
+make
+```
+The binary will be placed in the bin folder
